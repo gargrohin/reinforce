@@ -94,7 +94,7 @@ class MLP(nn.Module):
         super().__init__()
         # 4 is a parameter transformer gods chose
         self.c_fc = nn.Linear(config.n_embd, 4*config.n_embd, bias=config.bias)
-        self.gelu = nn.GELU()
+        self.gelu = nn.GELU(approximate="tanh")
         self.c_proj = nn.Linear(4*config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
     
@@ -187,7 +187,7 @@ class Transformer(nn.Module):
             loss = F.cross_entropy(logits.view(-1 , logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
             # inference time
-            logits = self.lm_head(x)[:, [-1], :] # list [-1] preserves time dimensionnnnn
+            logits = self.lm_head(x)#[:, [-1], :] # list [-1] preserves time dimensionnnnn
             loss = None
         
         return logits, loss
@@ -242,19 +242,20 @@ class Transformer(nn.Module):
         sd_keys_hf = sd_hf.keys()
         sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.masked_bias')] # ignore these, just a buffer
         sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.bias')] # same, just the mask (buffer)
-        transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
+        transposed = ['attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
         # basically the openai checkpoints use a "Conv1D" module, but we only want to use a vanilla Linear
         # this means that we have to transpose these weights when we import them
         assert len(sd_keys_hf) == len(sd_keys), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
+        
         for k in sd_keys_hf:
-            if any(k.endswith(w) for w in transposed):
-                assert sd_hf[k].shape[::-1] == sd[k].shape
-                with torch.no_grad():
-                    sd[k].copy_(sd_hf[k].t())
-            else:
-                assert sd_hf[k].shape == sd[k].shape
-                with torch.no_grad():
-                    sd[k].copy_(sd_hf[k])
+            v = sd_hf[k]
+            if any(k.endswith(w) for w in ["attn.c_attn.weight", "attn.c_proj.weight", "mlp.c_fc.weight", "mlp.c_proj.weight"]):
+                v = v.t()
+
+            assert v.shape == sd[k].shape, k
+            
+            with torch.no_grad():
+                sd[k].copy_(v)
         
         return model
 
