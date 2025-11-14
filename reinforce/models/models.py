@@ -42,7 +42,7 @@ class CausalSelfAttention(nn.Module):
         
         self.n_embd = config.n_embd
         self.n_head = config.n_head
-        self.dropout = nn.Dropout(config.dropout)
+        self.dropout = config.dropout
 
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
 
