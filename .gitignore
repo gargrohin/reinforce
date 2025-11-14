@@ -1,5 +1,10 @@
 # Documentation (local only)
 initial_helper_docs/
+CLAUDE.md
+PROGRESS.md
+
+# UV package manager
+uv.lock
 
 # Python
 __pycache__/
