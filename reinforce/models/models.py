@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import math
 from dataclasses import dataclass
 from transformers import GPT2LMHeadModel
+import inspect
 
 # class LayerNorm(nn.Module):
 
@@ -187,7 +188,7 @@ class Transformer(nn.Module):
             loss = F.cross_entropy(logits.view(-1 , logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
             # inference time
-            logits = self.lm_head(x)#[:, [-1], :] # list [-1] preserves time dimensionnnnn
+            logits = self.lm_head(x)[:, [-1], :] # list [-1] preserves time dimensionnnnn
             loss = None
         
         return logits, loss
@@ -242,14 +243,14 @@ class Transformer(nn.Module):
         sd_keys_hf = sd_hf.keys()
         sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.masked_bias')] # ignore these, just a buffer
         sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.bias')] # same, just the mask (buffer)
-        transposed = ['attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
+        transposed = ["attn.c_attn.weight", "attn.c_proj.weight", "mlp.c_fc.weight", "mlp.c_proj.weight"]
         # basically the openai checkpoints use a "Conv1D" module, but we only want to use a vanilla Linear
         # this means that we have to transpose these weights when we import them
         assert len(sd_keys_hf) == len(sd_keys), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
         
         for k in sd_keys_hf:
             v = sd_hf[k]
-            if any(k.endswith(w) for w in ["attn.c_attn.weight", "attn.c_proj.weight", "mlp.c_fc.weight", "mlp.c_proj.weight"]):
+            if any(k.endswith(w) for w in transposed):
                 v = v.t()
 
             assert v.shape == sd[k].shape, k
@@ -258,6 +259,36 @@ class Transformer(nn.Module):
                 sd[k].copy_(v)
         
         return model
+
+    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
+
+        param_dict = {pn: p for pn, p in self.named_parameters()}
+
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+
+        # create optim groups, to map weight decay to 2D params only.
+        # all weight tensors in matmuls + embeddings decay, biases and layernorms dont. 
+
+        decay_params = [p for n, p in param_dict.items() if p.dim() >=2]
+        nodecay_params = [p for n, p in param_dict.items() if p.dim() <2]
+
+        optim_groups = [
+            {'params': decay_params, 'weight_decay': weight_decay},
+            {'params': nodecay_params, 'weight_decay': 0.0}
+        ]
+
+        num_decay_params = sum(p.numel() for p in decay_params)
+        num_nodecay_params = sum(p.numel() for p in nodecay_params)
+        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+
+        fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+        use_fused = fused_available and device_type == 'cuda'
+        extra_args = dict(fused=True) if use_fused else dict()
+        optimizer = torch.optim.AdamW(optim_groups, lr = learning_rate, betas = betas, **extra_args)
+        print(f"using fused AdamW: {use_fused}")
+
+        return optimizer
 
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature = 1.0, top_k=None):

@@ -1,6 +1,6 @@
 import torch
 from transformers import AutoTokenizer, GPT2LMHeadModel
-from models import Transformer, GPTConfig
+from reinforce.models import Transformer, GPTConfig
 import gc
 
 @torch.no_grad()

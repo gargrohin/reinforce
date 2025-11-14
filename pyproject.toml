@@ -1,0 +1,25 @@
+[project]
+name = "reinforce"
+version = "0.1.0"
+description = "REINFORCE implementation from scratch for LLM fine-tuning"
+requires-python = ">=3.11"
+dependencies = [
+    "torch==2.9.0",
+    "torchvision==0.24.0",
+    "torchaudio==2.9.0",
+    "transformers==4.57.1",
+    "datasets==4.4.1",
+    "flash-attn==2.8.3",
+    "numpy==2.3.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "jupyter",
+    "ipython",
+    "matplotlib",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
