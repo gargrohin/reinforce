@@ -1,3 +1,4 @@
+from pickle import FALSE
 from datasets import load_dataset
 from transformers import AutoTokenizer
 import torch
@@ -12,8 +13,8 @@ ds = load_dataset("HuggingFaceFW/fineweb", "sample-10BT", split="train")
 ds = ds.take(100000)
 
 block_size = 1024
-epochs = 2
-learning_rate = 3e-4
+epochs = 10
+learning_rate = 6e-5
 batch_size = 16
 weight_decay = 0.1
 USE_WANDB = True  # Set to True to enable W&B logging
@@ -63,7 +64,7 @@ print(f"Dataset size: {len(ds)}")
 print(f"Number of batches per epoch: {len(dl)}")
 print(f"Sample input_ids lengths: {[len(x) for x in ds['input_ids'][:10]]}")
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 model = Transformer.from_pretrained("gpt2").to(device)
 
 opt = model.configure_optimizers(
@@ -120,23 +121,28 @@ for epoch in range(epochs):
         loss.backward()
 
         # Check gradients
-        # if bc == 0:
-        #     total_norm = 0
-        #     for p in model.parameters():
-        #         if p.grad is not None:
-        #             param_norm = p.grad.data.norm(2)
-        #             total_norm += param_norm.item() ** 2
-        #     total_norm = total_norm ** 0.5
-        #     print(f"Gradient norm before clipping: {total_norm:.6f}")
+        if bc == 0:
+            total_norm = 0
+            for p in model.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.data.norm(2)
+                    total_norm += param_norm.item() ** 2
+            total_norm = total_norm ** 0.5
+            print(f"Gradient norm before clipping: {total_norm:.6f}")
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
         opt.step()
+        if bc == 0:
+            # Check if parameters actually changed
+            param_sample = next(model.parameters())
+            print(f"Sample param mean: {param_sample.mean().item():.6f}")
+            print(f"Sample param std: {param_sample.std().item():.6f}")
         opt.zero_grad()
         losses.append(loss.item())
 
-        # if bc % 100 == 0:
-        #     print(f"\nStep {bc}: loss: {loss.item():.6f}")
-        #     print(f"Sample tokens: {input_ids[0, :20]}")
+        if bc % 100 == 0:
+            print(f"\nStep {bc}: loss: {loss.item():.6f}")
+            print(f"Sample tokens: {input_ids[0, :20]}")
 
         bc += 1
         if USE_WANDB:
