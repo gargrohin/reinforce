@@ -58,7 +58,7 @@ class CausalSelfAttention(nn.Module):
 
 
 
-    def forward(self, x):
+    def forward(self, x, attention_mask=None):
         B, T, C = x.size() # batch size, seq length, embed dim (n_embd)
 
         # query key values for all heads in batch
@@ -72,11 +72,18 @@ class CausalSelfAttention(nn.Module):
 
         if self.flash:
             # use flash attention cuda kernels
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
+            if attention_mask is not None:
+                attn_mask_flash = attention_mask[:, None, None, :].bool()
+            else:
+                attn_mask_flash = None
+            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask_flash, dropout_p=self.dropout if self.training else 0, is_causal=True)
         else:
             # actual stuff
             attn = (q @ k.transpose(-2,-1)) * (1.0 / math.sqrt(k.size(-1)))
             attn = attn.masked_fill(self.mask[:, :, :T, :T] == 0, float('-inf'))
+            if attention_mask is not None:
+                padding_mask = attention_mask[:, None, None, :]
+                attn = attn.masked_fill(padding_mask == 0, float('-inf'))
             attn = F.softmax(attn, dim=-1)
             attn = self.attn_dropout(attn)
 
@@ -114,8 +121,8 @@ class Block(nn.Module):
         self.ln_2 = nn.LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
     
-    def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
+    def forward(self, x, attention_mask=None):
+        x = x + self.attn(self.ln_1(x), attention_mask=attention_mask)
         x = x + self.mlp(self.ln_2(x))
         return x
     
@@ -167,7 +174,7 @@ class Transformer(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
         
     
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, attention_mask=None):
         b, t = idx.size()
         device = idx.device
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
@@ -179,7 +186,7 @@ class Transformer(nn.Module):
 
         x = self.transformer.drop(tok_embd + pos_embd)
         for block in self.transformer.h:
-            x = block(x)
+            x = block(x, attention_mask=attention_mask)
         x = self.transformer.ln_f(x)
 
         if targets is not None: 
