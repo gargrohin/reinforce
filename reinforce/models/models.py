@@ -174,6 +174,42 @@ class Transformer(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
         
     
+    def generate_with_log_probs(self, idx, max_new_tokens, temperature = 1.0, attention_mask = None):
+        """
+        Gen tokens and return log probs
+        """
+
+        generated_tokens = []
+        log_probs = []
+
+        for _ in range(max_new_tokens):
+            logits, _ = self.forward(idx, attention_mask=attention_mask)
+            logits = logits[:, -1, :]  / temperature
+
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples = 1)
+
+            log_probs_dist = F.log_softmax(logits, dim=-1)
+            log_prob_gathered = log_probs_dist.gather(dim=-1, index=idx_next)
+
+            generated_tokens.append(idx_next)
+            log_probs.append(log_prob_gathered)
+
+            idx = torch.cat([idx, idx_next], dim=1)
+
+            # update attention mask
+            if attention_mask is not None:
+                attention_mask = torch.cat([
+                    attention_mask,
+                    torch.ones(
+                        (attention_mask.shape[0], 1),
+                        dtype=attention_mask.dtype,   # Match dtype explicitly
+                        device=attention_mask.device
+                    )
+                ], dim=1)
+
+        return torch.cat(generated_tokens, dim=1), torch.cat(log_probs, dim=1)
+
     def forward(self, idx, targets=None, attention_mask=None):
         b, t = idx.size()
         device = idx.device
