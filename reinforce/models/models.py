@@ -333,6 +333,23 @@ class Transformer(nn.Module):
 
         return optimizer
 
+    def compute_log_probs(self, input_ids, generated_ids):
+        """
+        Compute log probs for generated ids given input ids as context.
+
+        input_ids: (B, prompt_len + gen_len)
+        gen ids: (B, gen_len)
+
+        returns: (B, gen_len) log probs
+        """
+
+        logits, _ = self(input_ids, input_ids)
+        logits = logits[:, -(generated_ids.shape[1]+1):-1, :]
+        log_probs = F.log_softmax(logits, dim=-1)
+        log_probs = log_probs.gather(dim=-1, index=generated_ids.unsqueeze(-1))
+        return log_probs.squeeze(-1)
+
+
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature = 1.0, top_k=None):
         

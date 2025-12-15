@@ -11,6 +11,7 @@ from pathlib import Path
 
 from reinforce.training.reward import SentimentRewardFunction
 from reinforce.training.baseline import RewardBaseline
+from reinforce.models.models import Transformer
 
 try:
     import wandb
@@ -54,6 +55,11 @@ class ReinforceTrainer:
             weight_decay=config.weight_decay
         )
 
+        self.ref_model = Transformer.from_pretrained(config.model_name).to(device)
+        self.ref_model.eval()
+        for p in self.ref_model.parameters():
+            p.requires_grad = False
+        
         self.reward_fn = SentimentRewardFunction(
             model_name=config.sentiment_model,
             device=0 if device == 'cuda' else -1
@@ -102,12 +108,22 @@ class ReinforceTrainer:
         # Decode generated tokens to text
         generated_texts = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
 
+        full_text = torch.cat([prompt_tokens, generated_tokens], dim=1)
+        with torch.no_grad():
+            ref_log_probs = self.ref_model.compute_log_probs(full_text, generated_tokens)
+
+        # KL 
+        kl = log_probs - ref_log_probs
+        kl_penalty = kl.mean(dim=1)*self.config.kl_coef
+
         # Compute rewards
         rewards = self.reward_fn(
             sentence_fragments,
             generated_texts,
             target_sentiments
         ).to(self.device)
+
+        rewards = rewards - kl_penalty
 
         # Update baseline
         self.baseline.update(rewards)
@@ -140,6 +156,7 @@ class ReinforceTrainer:
                 'train/baseline': baseline_value,
                 'train/advantages_mean': advantages.mean().item(),
                 'train/log_probs_mean': log_probs_sum.mean().item(),
+                'train/kl_penalty_mean': kl_penalty.mean().item(),
             }, step=self.global_step)
 
         return {
