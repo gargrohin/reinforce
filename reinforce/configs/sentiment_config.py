@@ -20,12 +20,12 @@ class SentimentReinforceConfig:
     num_workers: int = 4
 
     # Training
-    num_epochs: int = 3
+    num_epochs: int = 1
     learning_rate: float = 1e-5
     weight_decay: float = 0.01
     max_new_tokens: int = 10  # Number of tokens to generate per prompt
     temperature: float = 1.0  # Sampling temperature
-    kl_coef: float = 0.05  # β coefficient for KL penalty
+    kl_coef: float = 0.2  # β coefficient for KL penalty
 
     # REINFORCE
     baseline_decay: float = 0.99  # Exponential moving average decay for baseline
